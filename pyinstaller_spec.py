@@ -1,9 +1,8 @@
+# -*- mode: python ; coding: utf-8 -*-
 """
 BabelDOC PyInstaller 配置文件
 用于精确控制打包过程
 """
-
-# -*- mode: python ; coding: utf-8 -*-
 
 import os
 import sys
@@ -121,21 +120,17 @@ a = Analysis(
 # 创建PYZ归档
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# 创建可执行文件 - 单文件模式
+# 创建可执行文件 - 目录模式（更稳定）
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='babeldoc',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # 暂时禁用UPX压缩（避免依赖问题）
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,  # 禁用UPX压缩（避免依赖问题）
     console=True,  # 保留控制台窗口
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -144,12 +139,14 @@ exe = EXE(
     entitlements_file=None,
 )
 
-# 如果需要目录模式，可以使用以下配置：
-# coll = COLLECT(exe,
-#                a.binaries,
-#                a.zipfiles,
-#                a.datas,
-#                strip=False,
-#                upx=False,
-#                upx_exclude=[],
-#                name='babeldoc')
+# 使用目录模式收集所有文件
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='babeldoc'
+)

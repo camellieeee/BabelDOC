@@ -46,3 +46,5 @@ CLAUDE.md
 /.claude
 babeldoc/format/playground
 temp.jpg
+
+build/*
