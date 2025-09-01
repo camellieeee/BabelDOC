@@ -1,0 +1,14 @@
+# BabelDOC 构建依赖
+# 用于构建可执行文件的额外依赖
+
+# 打包工具
+pyinstaller>=6.0.0
+
+# 构建辅助工具
+wheel>=0.41.0
+setuptools>=68.0.0
+
+# 注意：UPX压缩工具需要单独安装
+# macOS: brew install upx
+# Ubuntu: sudo apt install upx-ucl
+# Windows: 下载 https://upx.github.io/
