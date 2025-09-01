@@ -71,6 +71,11 @@ a = Analysis(
         (str(project_root / 'babeldoc'), 'babeldoc'),
         # 包含模型和资源文件
         (str(project_root / 'babeldoc' / 'assets'), 'babeldoc/assets'),
+        # 包含tiktoken_ext数据
+        ('/opt/anaconda3/envs/babeldoc/lib/python3.12/site-packages/tiktoken_ext', 'tiktoken_ext'),
+        # 包含babeldoc的tiktoken缓存
+        ('/Users/mofei/.babeldoc/assets/tiktoken', '_babeldoc_tiktoken_cache'),
+        ('/Users/mofei/.cache/babeldoc/tiktoken', '_babeldoc_tiktoken_cache2'),
         # 包含字体等资源
     ],
     hiddenimports=[
@@ -146,6 +151,9 @@ a = Analysis(
         'setuptools._vendor.jaraco.functools',
         'setuptools._vendor.jaraco.context',
         'pkg_resources',
+        # tiktoken相关
+        'tiktoken_ext',
+        'tiktoken_ext.openai_public',
         # 异步相关
         'asyncio',
         'concurrent.futures',
