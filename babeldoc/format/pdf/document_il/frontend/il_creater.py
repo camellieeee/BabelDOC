@@ -150,7 +150,7 @@ def get_truetype_ansi_bbox_list(face):
     return bbox_list
 
 
-def get_truetype_custom_bbox_list(face):
+def collect_face_cmap(face):
     umap = []  # unicode maps
     lmap = []  # legacy maps
     for cmap in face.charmaps:
@@ -158,6 +158,11 @@ def get_truetype_custom_bbox_list(face):
             umap.append(cmap)
         else:
             lmap.append(cmap)
+    return umap, lmap
+
+
+def get_truetype_custom_bbox_list(face):
+    umap, lmap = collect_face_cmap(face)
     if umap:
         face.set_charmap(umap[0])
     elif lmap:
@@ -184,21 +189,10 @@ def parse_font_file(doc, idx, encoding, differences):
         glyph_name_set.add(face.get_glyph_name(x).decode("U8"))
     scale = 1000 / face.units_per_EM
     enc_name, enc_vector = encoding
-    if enc_name == "Custom":
-        for charmap in face.charmaps:
-            face.select_charmap(charmap.encoding)
-            if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
-                face.select_charmap(charmap.encoding)
-                break
-    elif enc_name == "MacRomanEncoding":
-        for charmap in face.charmaps:
-            face.select_charmap(charmap.encoding)
-            if (
-                charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM"
-                or charmap.encoding_name == "FT_ENCODING_APPLE_ROMAN"
-            ):
-                face.select_charmap(charmap.encoding)
-                break
+    _, lmap = collect_face_cmap(face)
+    abbr = enc_name.removesuffix("Encoding")
+    if lmap and abbr in ["Custom", "MacRoman", "Standard", "WinAnsi", "MacExpert"]:
+        face.set_charmap(lmap[0])
     for i, x in enumerate(enc_vector):
         if x in glyph_name_set:
             v = get_name_cbox(face, x.encode("U8"))
@@ -354,6 +348,7 @@ class ILCreater:
         self.xobj_stack = []
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
+        self.current_available_fonts = {}
         self.mupdf_font_map: dict[int, pymupdf.Font] = {}
         self.graphic_state_pool = {}
         self.enable_graphic_element_process = (
@@ -508,25 +503,20 @@ class ILCreater:
     def push_xobj(self):
         self.xobj_stack.append(
             (
-                self.current_page_font_name_id_map.copy(),
-                self.current_page_font_char_bounding_box_map.copy(),
                 self.xobj_id,
                 self.current_clip_paths.copy(),
+                self.current_available_fonts.copy(),
             ),
         )
-        self.current_page_font_name_id_map = {}
-        self.current_page_font_char_bounding_box_map = {}
         self.current_clip_paths = []
 
     def pop_xobj(self):
-        (
-            self.current_page_font_name_id_map,
-            self.current_page_font_char_bounding_box_map,
-            self.xobj_id,
-            self.current_clip_paths,
-        ) = self.xobj_stack.pop()
+        (self.xobj_id, self.current_clip_paths, self.current_available_fonts) = (
+            self.xobj_stack.pop()
+        )
 
     def on_xobj_begin(self, bbox, xref_id):
+        logger.debug(f"on_xobj_begin: {bbox} @ {xref_id}")
         self.push_passthrough_per_char_instruction()
         self.push_xobj()
         self.xobj_inc += 1
@@ -540,9 +530,11 @@ class ILCreater:
             ),
             xobj_id=self.xobj_id,
             xref_id=xref_id,
+            pdf_font=[],
         )
         self.current_page.pdf_xobject.append(xobject)
         self.xobj_map[self.xobj_id] = xobject
+        xobject.pdf_font.extend(self.current_available_fonts.values())
         return self.xobj_id
 
     def on_xobj_end(self, xobj_id, base_op):
@@ -608,6 +600,7 @@ class ILCreater:
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
         font_name = font.fontname
+        logger.debug(f"handle font {font_name} @ {xref_id} in {self.xobj_id}")
         if isinstance(font_name, bytes):
             try:
                 font_name = font_name.decode("utf-8")
@@ -716,11 +709,11 @@ class ILCreater:
             if self.xobj_id in self.xobj_map:
                 if self.xobj_id not in self.current_page_font_char_bounding_box_map:
                     self.current_page_font_char_bounding_box_map[self.xobj_id] = {}
-                self.current_page_font_char_bounding_box_map[self.xobj_id][font_id] = (
+                self.current_page_font_char_bounding_box_map[self.xobj_id][xref_id] = (
                     font_char_bounding_box_map
                 )
             else:
-                self.current_page_font_char_bounding_box_map[font_id] = (
+                self.current_page_font_char_bounding_box_map[xref_id] = (
                     font_char_bounding_box_map
                 )
         except Exception as e:
@@ -729,10 +722,18 @@ class ILCreater:
             else:
                 logger.error("failed to parse font xobj id %d: %s", xref_id, e)
         self.current_page_font_name_id_map[xref_id] = font_id
+        self.current_available_fonts[font_id] = il_font_metadata
+
+        fonts = self.current_page.pdf_font
         if self.xobj_id in self.xobj_map:
-            self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
-        else:
-            self.current_page.pdf_font.append(il_font_metadata)
+            fonts = self.xobj_map[self.xobj_id].pdf_font
+        should_remove = []
+        for f in fonts:
+            if f.font_id == font_id:
+                should_remove.append(f)
+        for sr in should_remove:
+            fonts.remove(sr)
+        fonts.append(il_font_metadata)
 
     def parse_font_xobj_id(self, xobj_id: int):
         if xobj_id is None:
@@ -847,7 +848,8 @@ class ILCreater:
         gs = self.create_graphic_state(char.graphicstate)
         # Get font from current page or xobject
         font = None
-        for pdf_font in self.xobj_map.get(self.xobj_id, self.current_page).pdf_font:
+        pdf_font = None
+        for pdf_font in self.xobj_map.get(char.xobj_id, self.current_page).pdf_font:
             if pdf_font.font_id == char.aw_font_id:
                 font = pdf_font
                 break
@@ -859,12 +861,13 @@ class ILCreater:
 
         char_id = char.cid
 
+        char_bounding_box = None
         try:
             if (
                 font_bounding_box_map
                 := self.current_page_font_char_bounding_box_map.get(
-                    self.xobj_id, self.current_page_font_char_bounding_box_map
-                ).get(font.font_id)
+                    char.xobj_id, self.current_page_font_char_bounding_box_map
+                ).get(font.xref_id)
             ):
                 char_bounding_box = font_bounding_box_map.get(char_id, None)
             else:
@@ -1098,6 +1101,7 @@ class ILCreater:
         bbox: tuple[float, float, float, float],
         matrix: tuple[float, float, float, float, float, float],
     ):
+        logger.debug(f"on_xobj_form: {do_args}[{bbox}] @ {xref_id} in {self.xobj_id}")
         matrix = mult_matrix(matrix, ctm)
         (x, y, w, h) = guarded_bbox(bbox)
         bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
