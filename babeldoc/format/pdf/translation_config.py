@@ -174,8 +174,11 @@ class TranslationConfig:
         non_formula_line_iou_threshold: float = 0.9,
         figure_table_protection_threshold: float = 0.9,
         skip_formula_offset_calculation: bool = False,
+        term_extraction_translator: BaseTranslator | None = None,
+        metadata_extra_data: str | None = None,
     ):
         self.translator = translator
+        self.term_extraction_translator = term_extraction_translator or translator
         initial_user_glossaries = list(glossaries) if glossaries else []
 
         self.input_file = input_file
@@ -224,6 +227,7 @@ class TranslationConfig:
 
         if self.ocr_workaround:
             self.skip_scanned_detection = True
+            self.disable_rich_text_translate = True
 
         # for backward compatibility
         if use_side_by_side_dual is False and use_alternating_pages_dual is False:
@@ -311,6 +315,15 @@ class TranslationConfig:
         self.non_formula_line_iou_threshold = non_formula_line_iou_threshold
         self.figure_table_protection_threshold = figure_table_protection_threshold
         self.skip_formula_offset_calculation = skip_formula_offset_calculation
+
+        self.metadata_extra_data = metadata_extra_data
+
+        self.term_extraction_token_usage: dict[str, int] = {
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cache_hit_prompt_tokens": 0,
+        }
 
         if self.ocr_workaround:
             self.remove_non_formula_lines = False
@@ -416,6 +429,29 @@ class TranslationConfig:
     def cancel_translation(self):
         if self.progress_monitor is not None:
             self.progress_monitor.cancel()
+
+    def get_term_extraction_translator(self) -> BaseTranslator:
+        """Return the translator to use for automatic term extraction."""
+        return self.term_extraction_translator
+
+    def record_term_extraction_usage(
+        self,
+        total_tokens: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cache_hit_prompt_tokens: int,
+    ) -> None:
+        """Accumulate token usage for automatic term extraction."""
+        if total_tokens > 0:
+            self.term_extraction_token_usage["total_tokens"] += total_tokens
+        if prompt_tokens > 0:
+            self.term_extraction_token_usage["prompt_tokens"] += prompt_tokens
+        if completion_tokens > 0:
+            self.term_extraction_token_usage["completion_tokens"] += completion_tokens
+        if cache_hit_prompt_tokens > 0:
+            self.term_extraction_token_usage["cache_hit_prompt_tokens"] += (
+                cache_hit_prompt_tokens
+            )
 
 
 class TranslateResult:
